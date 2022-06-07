@@ -22,3 +22,6 @@ use_condaenv("dexibit_interview_task")
 
 py_install("pandas", envname = "dexibit_interview_task")
 py_install("scikit-learn", envname = "dexibit_interview_task")
+py_install("matplotlib", envname = "dexibit_interview_task")
+py_install("dtreeviz", envname = "dexibit_interview_task")
+py_install("treeinterpreter", envname = "dexibit_interview_task")

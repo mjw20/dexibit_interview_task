@@ -2,9 +2,14 @@
 # 2022.06
 # Jun
 
+# NUMBER OF DAYS IT WAS RUN
+
 # packages
 library(tidyverse)
 library(lubridate)
+library(caret)
+library(matrixStats)
+library(fastDummies)
 
 # read in data
 daily_admin = read_csv("./data/dailyAdmission2022.csv")
@@ -25,7 +30,7 @@ df_meta$end_date = as.Date(df_meta$EndDate, "%d/%m/%Y")
 names(df_events) = tolower(str_replace_all(names(df_events), " ", "_"))
 df_events$from_date = as.Date(df_events$valid_from, "%d-%m-%Y")
 df_events$to_date = as.Date(df_events$valid_through, "%d-%m-%Y")
-# Note: School holidays are mutiple holidays, others are single date events.
+# Note: School holidays are multiple holidays, others are single date events.
 
 # check basic data info
 summary(daily_admin)
@@ -38,7 +43,7 @@ length(unique(daily_visit$id)) #id has no meaning here.
 daily_admin2 = daily_admin %>% filter(sold > 0) 
 #Note: Under the Ice and Under The Ice solved by this too
 
-df_meta$end_date - df_meta$start_date # all positvie no quality issue with meta info.
+df_meta$end_date - df_meta$start_date # all positive no quality issue with meta info.
 
 # change the name of necessary variable for df_meta
 names(df_meta)[1] = "Product"
@@ -75,6 +80,19 @@ daily_admin3$date_pot[which(is.na(daily_admin3$date_pot))] =
   daily_admin3$date_new[which(is.na(daily_admin3$date_pot))]
 
 summary(daily_admin3$date_pot)
+
+## df events dates.
+df_events = df_events %>% mutate(diff = to_date - from_date)
+df_events %>% filter(diff < 0) %>% 
+  mutate(from_date_alt = as.Date(valid_from, "%m-%d-%Y"),
+         to_date_alt = as.Date(valid_through, "%m-%d-%Y"))
+
+df_events$from_date[which(df_events$diff < 0)[c(1,3,5,6)]] <- 
+  as.Date(df_events$valid_from[which(df_events$diff < 0)[c(1,3,5,6)]], "%m-%d-%Y")
+df_events$to_date[which(df_events$diff < 0)[c(2,4)]] <- 
+  as.Date(df_events$valid_through[which(df_events$diff < 0)[c(2,4)]], "%m-%d-%Y")
+
+df_events = df_events %>% mutate(diff = to_date - from_date)
 
 # re-validate:
 daily_admin3 %>% 
@@ -196,7 +214,7 @@ for(i in 1:length(df_meta$product)){
   df[,df_meta$product[i]][duration_check(i)] = df_meta$`Adult Ticket Price`[i]
 }
 
-df$avg_price = df %>% select(df_meta$product) %>% rowMeans(na.rm = TRUE)
+df$avg_price = df %>% select(df_meta$product) %>% as.matrix() %>% rowMins(na.rm = TRUE)
 
 ## classification
 df[,df_meta$product] <- NA
@@ -255,6 +273,19 @@ for(i in 1:length(df_meta$product)){
 
 df$young_only = df %>% select(df_meta$product) %>% rowSums()
 
+## duration
+df[,df_meta$product] <- NA
+
+for(i in 1:dim(df_meta)[1]){
+  df[,df_meta$product[i]][which(df$dates >= df_meta$start_date[i] & df$dates <= df_meta$end_date[i])] =
+    1:(as.numeric(df_meta$end_date[i] - df_meta$start_date[i])+1)
+}
+
+### minimum duration
+df$duration_min = df %>% select(df_meta$product) %>% as.matrix() %>% rowMins(na.rm = TRUE)
+### maximum duration
+df$duration_max = df %>% select(df_meta$product) %>% as.matrix() %>% rowMaxs(na.rm = TRUE)
+
 ## drop the dummy variables:
 df = df %>% select(-c(df_meta$product))
 
@@ -268,6 +299,10 @@ df = df %>% mutate(year = year(dates),
                       levels = c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"),
                       ordered = TRUE) %>% as.numeric())
 
+
+### create dummy variables for day of week.
+df = df %>% dummy_cols("day_of_week")
+
 ### cyclic encode month, week and day
 df = df %>% mutate(month_cos = cos(2*pi*month/max(month)),
               month_sin = sin(2*pi*month/max(month)),
@@ -275,3 +310,82 @@ df = df %>% mutate(month_cos = cos(2*pi*month/max(month)),
               week_sin =sin(2*pi*dow/max(dow)),
               day_cos = cos(2*pi*day/max(day)),
               day_sin = sin(2*pi*day/max(day)))
+
+## add events
+school_holidays = df_events %>% filter(type == "School Holidays")
+public_holidays = df_events %>% filter(type == "Public Holidays")
+regional_holidays = df_events %>% filter(type == "Regional")
+special_holidays = df_events %>% filter(type == "Special")
+
+df = df %>% add_column(school_holidays = 0,
+                       public_holidays = 0,
+                       regional_holidays = 0,
+                       special_holidays = 0,
+                       impact_of_competing_events = -1,
+                       people_in_area_due_to_competing_events = -1)
+
+### school holidays
+for(i in 1:dim(school_holidays)[1]){
+  index = which(df$dates >= school_holidays$from_date[i] &
+                  df$dates <= school_holidays$to_date[i])
+  df$school_holidays[index] = 1
+}
+
+### public holidays
+for(i in 1:dim(public_holidays)[1]){
+  index = which(df$dates == public_holidays$from_date[i])
+  df$public_holidays[index] = 1
+}
+
+### regional holidays
+for(i in 1:dim(regional_holidays)[1]){
+  index = which(df$dates == regional_holidays$from_date[i])
+  df$regional_holidays[index] = 1
+}
+
+### special holidays
+for(i in 1:dim(special_holidays)[1]){
+  index = which(df$dates == special_holidays$from_date[i])
+  df$special_holidays[index] = 1
+  df$impact_of_competing_events[index] = special_holidays$impact_of_competing_event[i]
+  df$people_in_area_due_to_competing_events[index] = special_holidays$people_in_area_due_to_competing_events[i]
+}
+
+# Check distribution and missing values.
+names(df)
+df$avg_price[which(df$avg_price == Inf)] = NA
+sapply(df, function(x) sum(is.na(x)))
+
+## use mean value per month for visitors to impute the missing visitors.
+estimated_visitors = df %>% 
+  filter(is.na(visitors)) %>% 
+  left_join(df %>% group_by(month) %>% summarise(mean_visitors = floor(mean(visitors, na.rm = T))), "month") %>% 
+  pull(mean_visitors)
+
+df$visitors[which(is.na(df$visitors))] = estimated_visitors
+
+## we only care about tickets sold, so if tickets sold is na, we ignore them
+df_sold = df %>% filter(!is.na(total_tickets_sold))
+sapply(df_sold, function(x) sum(is.na(x)))
+
+# data output
+
+## data for our final predictions, the goal of this project
+df_predict = df %>% filter(dates >= df_meta$start_date[1] & dates <= df_meta$end_date[1]) %>% 
+  select(-c(dates, day, dow, month, day_of_week))
+sapply(df_predict, function(x) sum(is.na(x)))
+## 0.8 training, 0.2 testing split.
+df_split = df_sold %>% select(-c(dates, day, dow, month, day_of_week)) %>% 
+  mutate(log_tickets_sold = log(total_tickets_sold)) %>% 
+  select(-total_tickets_sold)
+
+set.seed(123)
+trainIndex <- createDataPartition(df_split$log_tickets_sold, p = .8,
+                                  list = FALSE,
+                                  times = 1)
+train <- df_split[trainIndex, ]
+test <- df_split[-trainIndex, ]
+
+write_csv(train, "./data/train_data.csv")
+write_csv(test, "./data/test_data.csv")
+write_csv(df_predict, "./data/predict_data.csv")

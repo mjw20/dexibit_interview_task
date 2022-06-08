@@ -389,3 +389,13 @@ test <- df_split[-trainIndex, ]
 write_csv(train, "./data/train_data.csv")
 write_csv(test, "./data/test_data.csv")
 write_csv(df_predict, "./data/predict_data.csv")
+
+# # output final prediction for the targeted exhibition
+# pred_goal = read_csv("./data/pred_goal.csv")
+# df_output = df %>% 
+#   filter(dates >= df_meta$start_date[1] & dates <= df_meta$end_date[1]) %>% 
+#   select(-c(day, dow, month, day_of_week)) %>%
+#   bind_cols(pred_goal) %>%
+#   mutate(total_tickets_sold = round(exp(pred_goal)))
+# 
+# write_csv(df_output, "./data/Robert_Falcon_Scott_predictions.csv")
